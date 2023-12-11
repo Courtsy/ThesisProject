@@ -4,6 +4,6 @@ This GitHub shows how to extract hand tracking data out of Unity, visualise it u
 
 ## Structure
 
-* [Unity Scripts](Unity Scripts) - Folder where the Unity scripts are stored
+* [Unity Scripts](Unity%20Scripts) - Folder where the Unity scripts are stored
 
 
