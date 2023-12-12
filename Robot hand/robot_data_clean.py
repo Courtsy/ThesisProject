@@ -1,12 +1,14 @@
+# Importing necessary libraries
 import pandas as pd
 import numpy as np
 from scipy.spatial.transform import Rotation as R
 
 # Load the data
-data_path = 'pinch_1.csv'  # Replace with the path to your data file
-hand_data = pd.read_csv(data_path)
-hand_data.columns = hand_data.columns.str.strip()  # Strip leading spaces from column names
+data_path = 'pinch_1.csv'  # Define the path to the CSV file containing hand data
+hand_data = pd.read_csv(data_path) # Read the CSV file into a pandas DataFrame
+hand_data.columns = hand_data.columns.str.strip()  # Remove any leading or trailing spaces from column names
 
+# Mapping of old joint names to new, more descriptive names for clarity
 name_remapping = {'Body_Start': 'HandWristBase',
                   'Body_Hips': 'HandWristStart',
                   'Body_SpineLower': 'Thumb1',
@@ -33,48 +35,68 @@ name_remapping = {'Body_Start': 'HandWristBase',
                   'Body_LeftHandThumbTip': 'PinkyTip'
 }
 
+# Apply the name remapping to the 'Joint' column of the DataFrame
 hand_data['Joint'] = hand_data['Joint'].replace(name_remapping)
 
+# Filter out only the columns needed 
 hand_data= hand_data[['Joint', 'RotationX', 'RotationY', 'RotationZ', 'RotationW']]
 
+# Print the transformed DataFrame to check the loaded data
 print(hand_data)
 
+# Function to compute the rotation angle between two sets of quaternion rotations
 def compute_rotation_angle(data_original):
-    # This function will compute the rotation angle between two quaternions
+    """
+    This function computes the rotation angle for each joint with respect to the first measurement.
+    The rotation angle is the angle by which one rotation must be rotated to align with another rotation.
+    """
+    # Inner function that computes the rotation angle between two quaternions
     def rotation_angle(rotation1, rotation2):
+        # Convert quaternions to rotation objects
         r1 = R.from_quat(rotation1)
         r2 = R.from_quat(rotation2)
+        # Calculate the relative rotation by inverting one and multiplying it by the other
         relative_rotation = r2.inv() * r1
+        # The magnitude of the rotation gives the angle in radians
         return relative_rotation.magnitude()
 
-    # Create an empty DataFrame to store the computed rotation angles
+    # DataFrame to store the names of the joints and their respective rotation angles
     rotation_angles = pd.DataFrame(columns=['Name', 'Value'])
 
-    # Compute the number of groups
+    # Calculate the number of groups of joints by assuming each group has 24 joints
     num_groups = len(data_original) // 24
 
-    # Get the first group of data
+    # Isolate the first group to serve as a reference for calculating relative rotations
     first_group = data_original.iloc[0:24, :]
 
-    # Compute the rotation angle for each group compared to the first group
+    # Iterate over each group to calculate the rotation angles
     for g in range(1, num_groups):
+        # Isolate the current group
         group = data_original.iloc[g*24:(g+1)*24, :]
         # Reset the index of the group
         group.reset_index(drop=True, inplace=True)
+        # Calculate the rotation angle for each joint in the group relative to the first group
         for i in range(24):
             rotation1 = first_group.iloc[i, 1:5]
             rotation2 = group.iloc[i, 1:5]
             angle = rotation_angle(rotation1, rotation2)
+            # Create a new row with the joint name and the computed angle
             new_row = pd.DataFrame({'Name': [first_group.iloc[i, 0]], 'Value': [angle]})
+            # Append the new row to the DataFrame of angles
             rotation_angles = pd.concat([rotation_angles, new_row], ignore_index=True)
 
     return rotation_angles
 
+# Function to transform the original data to a new structure for robotic hand simulation
 def transform_data(data):
-    # Create a new column 'Group' to identify each group of 24 rows
+    """
+    This function transforms the data into a structure that is more suitable for robotic hand simulation.
+    It maps the joints to new names and groups the data in a way that can be used to control a robotic hand.
+    """
+    # Add a 'Group' column to the DataFrame to help in identifying the set of rotations
     data['Group'] = data.index // 24
 
-    # Define the mapping and new column names as before
+    # Define a mapping for the joints to new names for the robotic hand
     mapping = {
         'Index1': 'FFJ3',
         'Index2': 'FFJ2',
@@ -93,32 +115,42 @@ def transform_data(data):
         'Thumb2': 'THJ4',
         'Thumb3': 'THJ2',
         'Thumb4': 'THJ1',
-        # Add more mappings if there are more joints
+        
     }
+
+    # Define the new column names for the transformed data
     columns_new = ['WRJ2', 'WRJ1', 'FFJ4', 'FFJ3', 'FFJ2', 'FFJ1', 'FFtip', 'MFJ4', 'MFJ3', 'MFJ2', 'MFJ1', 'MFtip', 'RFJ4', 'RFJ3', 'RFJ2', 'RFJ1',
                    'RFtip', 'LFJ5', 'LFJ4', 'LFJ3', 'LFJ2', 'LFJ1', 'LFtip', 'THJ5', 'THJ4', 'THJ3', 'THJ2', 'THJ1', 'thtip']
 
-    # Create a new DataFrame to hold the transformed data
+    # DataFrame to hold the transformed data
     df_new = pd.DataFrame(columns=columns_new)
 
-    # For each group of 24 rows...
+    # Iterate over each group and transform the data accordingly
     for group, data_grouped in data.groupby('Group'):
-        # Create a new row in the new DataFrame
+        # Series to hold the data for the new row
         row_new = pd.Series(index=columns_new, dtype='float')
 
-        # Fill the new row using the original data and the mapping
+        # Map the original data to the new structure using the defined mapping
         for col_new in columns_new:
             if col_new in mapping.values():
+                # Find the original column name that maps to the new column name
                 col_original = [k for k, v in mapping.items() if v == col_new][0]
+                # Set the value in the new row
                 row_new[col_new] = data_grouped[data_grouped['Name'] == col_original]['Value'].values[0]
             else:
+                # If there's no mapping, set the value to 0
                 row_new[col_new] = 0
-        # Add the new row to the new DataFrame using pd.concat
+        # Add the new row to the DataFrame
         df_new = pd.concat([df_new, pd.DataFrame(row_new).transpose()])
 
     return df_new
 
+# Use the compute_rotation_angle function to calculate the rotation angles
 data = compute_rotation_angle(hand_data)
+
+# Transform the data using the transform_data function
 df_new = transform_data(data)
+
+# Save the transformed data to a new CSV file for use with the robotic hand
 df_new.to_csv('pinchrobot.csv', index=False)
 
